@@ -1,0 +1,21 @@
+services:
+  ms-conversations-cron:
+    build:
+      context: ./cron
+      dockerfile: Dockerfile
+
+    image: ms-conversations-cron:prod
+
+    restart: always
+
+    environment:
+      - ENV_PRODUCTION=true
+      - NODE_ENV=production
+      - TZ=America/Toronto
+
+    env_file:
+      - .env
+
+    volumes:
+      - /var/docker/logs/ms-conversations:/app/logs
+      - /var/docker/data/ms-conversations/documents:/storage/documents

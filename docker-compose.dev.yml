@@ -1,0 +1,32 @@
+services:
+  ms-conversations-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: deps
+
+    # Keep dev and prod builds from overwriting the same local image tag.
+    image: ms-conversations-backend:dev
+
+    environment:
+      - ENV_PRODUCTION=false
+      - SWAGGER_ENABLED=true
+      - NODE_ENV=development
+
+    ports:
+      - "6114:3000"
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./backend:/app
+
+      - /var/docker/logs/ms-conversations:/app/logs
+      - /var/docker/data/ms-conversations/documents:/storage/documents
+
+      # Preserve container-built Linux dependencies under the source bind mount.
+      - /app/node_modules
+      - /app/.pnpm-store
+
+    command: pnpm run start:dev
