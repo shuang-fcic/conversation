@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PermissionDenied": [
+      {
+        "matcher": "Read|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/skills/nestjs-config/scripts/hook-config-ts.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
