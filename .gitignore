@@ -1,0 +1,41 @@
+# dotenv environment variable files
+.env
+.env.development
+.env.test
+.env.production
+
+# IDE
+.idea
+
+# Claude Code — ignore personal overrides, commit shared project config
+.claude/**
+!.claude/settings.json
+!.claude/skills/
+!.claude/skills/create-pr/
+!.claude/skills/create-pr/**
+!.claude/skills/group-commits/
+!.claude/skills/group-commits/**
+!.claude/skills/nestjs-config/
+!.claude/skills/nestjs-config/**
+!.claude/skills/config-spec/
+!.claude/skills/config-spec/**
+!.claude/skills/env-template/
+!.claude/skills/env-template/**
+!.claude/skills/run-checks/
+!.claude/skills/run-checks/**
+
+!.claude/skills/create-spec/
+!.claude/skills/create-spec/**
+!.claude/skills/execute-spec/
+!.claude/skills/execute-spec/**
+!.claude/skills/update-spec/
+!.claude/skills/update-spec/**
+
+# temp directory
+.temp
+.tmp
+
+/.pnpm-store
+
+# keys
+*.pem
