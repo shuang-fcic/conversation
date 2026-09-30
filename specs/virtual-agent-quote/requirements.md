@@ -22,6 +22,14 @@ a `type` discriminator. This iteration implements only `type = VIRTUAL_AGENT_QUO
 but the model must generalize to `SUPPORT_TICKET` and forum threads without a
 schema rewrite. "Support ticket" will be a later `type` and view, not a new table.
 
+**The service is domain-agnostic.** It stores threads, messages, assignment,
+status, read state, and visibility — nothing more. All virtual-agent-quote
+business logic (quote data, accept/decline, *when* to open a conversation, the
+drawer UI) lives in ms-messaging and the rcNext ack landing page; only generic
+fields and an opaque `externalRef` cross the boundary. This spec lives here
+because VAQ is the *first consumer* that drives the build — not because the
+service is quote-specific.
+
 **Explicitly deferred to a later iteration (phase two):** support-ticket type,
 tags/categories, departments, a customer support widget + "my tickets" page,
 real customer authentication (portal session/JWT), participants beyond one
@@ -49,8 +57,10 @@ questions from the landing page.
 3. The call SHALL be **synchronous** — the workflow depends on the conversation
    existing before it returns the tokenized link to the customer. A failure
    SHALL surface to the caller (non-2xx) so the workflow can retry.
-4. Creation SHALL mint a **customer access token** (see R4) and return enough for
-   the caller to build the landing-page URL (or the URL itself).
+4. Creation SHALL mint a **customer access token** (see R4) and return it (plus
+   the conversation `publicId`) to the caller. This service returns the
+   token/ids only — **URL construction is the frontend's job** (R4), so no
+   customer frontend URL is configured or built here.
 
 ### R2 — Conversation data model (generalizable)
 
@@ -65,6 +75,10 @@ questions from the landing page.
 3. Customer and assignee SHALL be modeled as relations/foreign keys (not embedded
    blobs), so a participants table can supersede them in phase two without a
    data migration of message rows.
+4. The backend SHALL treat `type` as an **opaque discriminator** for
+   filtering/views only — it SHALL NOT branch business logic on the type value.
+   Use-case rules (what a "quote" is, accept/decline, quote rendering, *when* to
+   open a conversation) live in the consumer (ms-messaging + rcNext), never here.
 
 ### R3 — Message data model
 
@@ -84,6 +98,11 @@ questions from the landing page.
 
 **User story:** As a customer, I want to open my quote conversation from the
 email link without logging in.
+
+The customer UI is a **slide-in drawer embedded in the messaging/rcNext ack
+landing page** (not a standalone page this service hosts). The frontend holds the
+access token and constructs its own URLs; this service exposes only
+token-authorized APIs and stores no customer frontend URL.
 
 #### Acceptance criteria
 
@@ -131,13 +150,16 @@ email link without logging in.
 
 #### Acceptance criteria
 
-1. A conversation SHALL carry a `status` drawn from a per-type set; for
-   `VIRTUAL_AGENT_QUOTE`: `OPEN → PENDING_CUSTOMER → ANSWERED → RESOLVED → CLOSED`
-   (exact transitions defined in `design.md`).
-2. Status transitions SHALL be audited with the actor.
-3. The behaviour of a customer reply to a `RESOLVED`/`CLOSED` conversation SHALL
-   be defined (default: reopen to `OPEN` and notify the assignee) rather than
-   silently dropped.
+1. A conversation SHALL carry a **generic, domain-agnostic** `status`:
+   `OPEN → PENDING → RESOLVED → CLOSED`. The backend SHALL NOT encode
+   use-case-specific states or transition rules. A consumer that needs
+   "who are we waiting on" uses the generic `waitingOn` (`CUSTOMER | AGENT | null`),
+   not new status values.
+2. Status transitions SHALL be audited with the actor. The backend enforces only
+   generic validity (e.g. reopen-on-reply below), not per-use-case policy.
+3. The behaviour of a reply to a `RESOLVED`/`CLOSED` conversation SHALL be defined
+   (default: reopen to `OPEN` and notify the other party) rather than silently
+   dropped.
 
 ### R9 — Read tracking
 

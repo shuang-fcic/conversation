@@ -5,6 +5,20 @@
 Implements [requirements.md](requirements.md). This is the phase-one build of the
 `conversation/` domain module on top of the scaffolded infrastructure.
 
+## Generality boundary
+
+`ms-conversations` is a **general conversation system**, not a quote system.
+
+| Lives in `ms-conversations` (generic) | Lives in the consumer (ms-messaging + rcNext) |
+|---|---|
+| Thread + message storage, assignment, generic status, read state, `visibility`, tokens, tags | What a "quote" is; quote data + rendering; accept/decline |
+| Generic create/reply/assign/status/read APIs; notify-until-read | *When* to open a conversation (the VAQ workflow decides) |
+| `type` as an opaque discriminator (filter/view only) | The drawer UI and any type-specific screen |
+| An opaque `externalRef` column | The meaning of `externalRef` (a quote/application id) |
+
+If a rule would read "if type == VIRTUAL_AGENT_QUOTE then …", it does **not**
+belong in this service — push it to the consumer.
+
 ## Key decisions (settled)
 
 | Decision | Choice | Rationale |
@@ -14,7 +28,7 @@ Implements [requirements.md](requirements.md). This is the phase-one build of th
 | conversations → messaging (notify) | **Fire-and-forget REST** to messaging | Reuse messaging's SendGrid/suppression/throttle/delivery; a notify outage must not fail a reply (R10.3–R10.4) |
 | Rich text | Store **TipTap JSON**, render/sanitize server-side | No unsanitized client HTML persisted or emailed (R14) |
 | Notification throttling | **Notify-until-read** (edge-triggered) | One email per unread burst; no timer/cron needed (R10) |
-| Customer identity | **Tokenized URL** (ack-flow pattern) | No login for phase one; portal/JWT deferred (R4, R18) |
+| Customer identity | **Token**, UI embedded in messaging's ack landing page | No login; the frontend (rcNext ack page drawer) holds the token and builds URLs — this service exposes token-authorized APIs only (R4). Portal/JWT deferred (R18) |
 
 ## Component map
 
@@ -96,15 +110,19 @@ the schema descriptors leave room; do not add columns to `CONVERSATION` for tags
 
 ## Status lifecycle (R8)
 
-`OPEN` (created) → `PENDING_CUSTOMER` (agent replied, awaiting customer) →
-`ANSWERED` (customer replied, awaiting agent) → `RESOLVED` (agent marks done) →
-`CLOSED` (terminal).
+Generic and domain-agnostic: `OPEN` (created) → `PENDING` (a reply added, awaiting
+the other side) → `RESOLVED` (marked done) → `CLOSED` (terminal). An optional
+`waitingOn` (`CUSTOMER | AGENT | null`) captures direction generically, so no
+use-case-specific states are needed.
 
-- Agent `PUBLIC` reply: `OPEN`/`ANSWERED` → `PENDING_CUSTOMER`.
-- Customer reply: `OPEN`/`PENDING_CUSTOMER` → `ANSWERED`; on `RESOLVED`/`CLOSED`
-  → reopen to `ANSWERED` and notify assignee (R8.3 default).
+- A `PUBLIC` reply moves `OPEN`/`RESOLVED` → `PENDING` (or a reopen, below) and
+  sets `waitingOn` to the *other* party.
+- A reply to `RESOLVED`/`CLOSED` reopens to `OPEN` and notifies the other party
+  (R8.3 default).
 - `INTERNAL` notes do **not** change status.
-- All transitions audited (R8.2). Enforce transitions in the service, not the DB.
+- All transitions audited (R8.2). Enforce only these **generic** rules in the
+  service, not the DB — the backend does not know "quote" semantics. A consumer
+  that wants a richer state machine drives it via these primitives.
 
 ## Notify-until-read algorithm (R10)
 
@@ -134,8 +152,9 @@ if wasCaughtUp:
 `POST /conversations` guarded by `@AllowedAppSources(MS_MESSAGING)`. Body: DTO with
 `publicId`, customer, `externalRef`, optional `assigneeId`, optional opening
 message (TipTap JSON). Idempotent: look up by `publicId` under a write lock;
-return existing (200) or create (201). Returns the conversation + the
-customer landing URL (built from `CONVERSATION_FRONTEND_URL` + token).
+return existing (200) or create (201). Returns the conversation + the customer
+**access token** (not a URL) — the rcNext ack landing page hosts the conversation
+as a slide-in drawer and builds any URL itself, calling the token-authorized APIs.
 
 > On the messaging side this is a new step in its virtual-agent-quote workflow
 > (a REST call to this service). Keep messaging's call idempotent-retry-safe by
@@ -146,7 +165,11 @@ customer landing URL (built from `CONVERSATION_FRONTEND_URL` + token).
 `notification/messaging.client.ts` POSTs to messaging's message-start endpoint
 with `x-app-source: <this service>` and a **notification workflow + template**
 that must be added on the messaging side (a small templated email:
-"you have a new reply / a quote was assigned to you", linking back). Fire-and-forget:
+"you have a new reply / a quote was assigned to you", linking back). The
+**customer** notification deep-links back into messaging's own ack landing page
+(drawer open) using messaging's existing `ACK_FRONTEND_URL` — this service only
+passes the token/ref. The **agent** notification links to the agent portal (see
+Open questions). Fire-and-forget:
 `.catch()` logs + alerts, never throws into the caller. If durability is wanted
 later, flip this to an RMQ publish that messaging consumes (see R17 and the
 messaging integration note in AGENTS.md) — no reply event needed for a
@@ -155,8 +178,12 @@ notification.
 ### Config (`conversation.config.ts`, new namespace)
 
 - `MESSAGING_BASE_URL` — messaging base URL for the notify client.
-- `CONVERSATION_FRONTEND_URL` — public base for the tokenized customer link.
 - (token TTL / pepper if the token scheme needs one.)
+
+No customer frontend URL: the customer UI is a drawer inside messaging's ack
+landing page, so the frontend owns URL construction. If agent-notification deep
+links need a portal URL, that is decided in Open questions below — it is not the
+customer link.
 
 Register in `common/setup/config-module.options.ts` `NAMESPACES` (one line).
 Remember: `*.config.ts` is blocked for the Read/Write/Edit tools — use the
@@ -198,4 +225,9 @@ cap on the JSON before insert.
 2. Whether `SUBJECT` is derived (e.g. "Quote #{externalRef}") or caller-supplied
    at create.
 3. Token scheme specifics (length, hash algo, whether it expires) — mirror the
-   messaging ack token exactly if possible.
+   messaging ack token exactly if possible. Also: does the customer conversation
+   reuse the messaging **ack request token**, or mint its own returned at create?
+4. Agent-notification deep link: the agent portal URL — configured on this
+   service (an `AGENT_PORTAL_URL`) vs. supplied as a template variable on the
+   messaging side. Decide when the agent frontend exists; not needed for the
+   customer flow.
