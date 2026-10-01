@@ -9,6 +9,10 @@ import {
   throttlerConfig,
   ThrottlerEnv,
 } from 'src/common/config/throttler.config';
+import {
+  conversationConfig,
+  ConversationEnv,
+} from 'src/conversation/conversation.config';
 import { cronConfig, CronEnv } from 'src/cron/cron.config';
 import { databaseConfig, DatabaseEnv } from 'src/database/database.config';
 import { rmqConfig, RmqEnv } from 'src/rmq/rmq.config';
@@ -26,6 +30,7 @@ const NAMESPACES: Array<{
   { config: alertingConfig, env: AlertingEnv },
   { config: throttlerConfig, env: ThrottlerEnv },
   { config: cronConfig, env: CronEnv },
+  { config: conversationConfig, env: ConversationEnv },
 ];
 
 function validate(raw: Record<string, unknown>): Record<string, unknown> {
